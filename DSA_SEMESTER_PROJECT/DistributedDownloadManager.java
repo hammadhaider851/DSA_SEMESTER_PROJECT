@@ -1,5 +1,8 @@
 import java.util.*;
-
+import javax.swing.*;
+import java.awt.*;
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
 
 class FileNode {
     int fileId;
@@ -22,38 +25,33 @@ class FileCatalogTree {
         root = insertRec(root, id, name, size);
     }
 
-
     private FileNode insertRec(FileNode root, int id, String name, long size) {
-        if (root == null) {
-            return new FileNode(id, name, size);
-        }
-        if (id < root.fileId) {
-            root.left = insertRec(root.left, id, name, size);
-        } else if (id > root.fileId) {
-            root.right = insertRec(root.right, id, name, size);
-        }
+        if (root == null) return new FileNode(id, name, size);
+        if (id < root.fileId) root.left = insertRec(root.left, id, name, size);
+        else if (id > root.fileId) root.right = insertRec(root.right, id, name, size);
         return root;
     }
 
-    public void displayCatalog() {
-        System.out.println("\n--- Global Torrent File Catalog (BST In-Order) ---");
-        displayRec(root);
+    public String getCatalogString() {
+        StringBuilder sb = new StringBuilder("--- Global Torrent File Catalog (BST In-Order) ---\n");
+        buildCatalogString(root, sb);
+        return sb.toString();
     }
 
-    private void displayRec(FileNode root) {
+    private void buildCatalogString(FileNode root, StringBuilder sb) {
         if (root != null) {
-            displayRec(root.left);
-            System.out.println("[File ID: " + root.fileId + "] " + root.fileName + " (" + root.fileSizeInMb + " MB)");
-            displayRec(root.right);
+            buildCatalogString(root.left, sb);
+            sb.append("[File ID: ").append(root.fileId).append("] ")
+                    .append(root.fileName).append(" (").append(root.fileSizeInMb).append(" MB)\n");
+            buildCatalogString(root.right, sb);
         }
     }
 }
 
-
 class PeerNode {
     int peerId;
     String ipAddress;
-    int bandwidthMbps; // Performance Metric
+    int bandwidthMbps;
     PeerNode prev, next;
 
     public PeerNode(int id, String ip, int speed) {
@@ -77,13 +75,15 @@ class ConnectedPeerList {
         }
     }
 
-    public void displayPeers() {
-        System.out.println("\n--- Connected Network Peers (Doubly Linked List) ---");
+    public String getPeersString() {
+        StringBuilder sb = new StringBuilder("--- Connected Network Peers (Doubly Linked List) ---\n");
         PeerNode current = head;
         while (current != null) {
-            System.out.println("Peer #" + current.peerId + " | IP: " + current.ipAddress + " | Speed: " + current.bandwidthMbps + " Mbps");
+            sb.append("Peer #").append(current.peerId).append(" | IP: ").append(current.ipAddress)
+                    .append(" | Speed: ").append(current.bandwidthMbps).append(" Mbps\n");
             current = current.next;
         }
+        return sb.toString();
     }
 
     public PeerNode getHead() { return head; }
@@ -100,43 +100,124 @@ class ActiveDownloader implements Comparable<ActiveDownloader> {
 
     @Override
     public int compareTo(ActiveDownloader other) {
-        // Max-Heap behavior: Highest speed download prioritized (Greedy)
         return Integer.compare(other.currentSpeed, this.currentSpeed);
     }
 }
 
-public class DistributedDownloadManager {
+public class DistributedDownloadManager extends JFrame {
 
     private String[] systemLogs;
     private int logCount;
     private ArrayList<Integer> missingChunksList;
-
     private Queue<Integer> chunkDownloadQueue;
     private Stack<Integer> completedDownloadHistory;
-
     private HashMap<Integer, String> chunkRegistryMap;
-
     private PriorityQueue<ActiveDownloader> clusterPriorityQueue;
-
     private ConnectedPeerList peerNetwork;
     private FileCatalogTree networkCatalog;
 
+    private JTextArea displayArea;
+    private JTextArea logArea;
+    private JButton btnBootstrap, btnDownload, btnRollback, btnState;
+
     public DistributedDownloadManager() {
-        systemLogs = new String[5]; // Fixed-size Array
+        systemLogs = new String[10];
         logCount = 0;
-        missingChunksList = new ArrayList<>(); // Dynamic Array
-        chunkDownloadQueue = new LinkedList<>(); // Standard Queue
-        completedDownloadHistory = new Stack<>(); // Stack
-        chunkRegistryMap = new HashMap<>(); // HashMap
-        clusterPriorityQueue = new PriorityQueue<>(); // Min/Max Heap
+        missingChunksList = new ArrayList<>();
+        chunkDownloadQueue = new LinkedList<>();
+        completedDownloadHistory = new Stack<>();
+        chunkRegistryMap = new HashMap<>();
+        clusterPriorityQueue = new PriorityQueue<>();
         peerNetwork = new ConnectedPeerList();
         networkCatalog = new FileCatalogTree();
+
+        setTitle("Distributed Download Manager (P2P Swarm Simulator)");
+        setSize(850, 600);
+        setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        setLocationRelativeTo(null);
+        setLayout(new BorderLayout(10, 10));
+
+        displayArea = new JTextArea();
+        displayArea.setEditable(false);
+        displayArea.setFont(new Font("Consolas", Font.PLAIN, 12));
+        JScrollPane scrollDisplay = new JScrollPane(displayArea);
+
+        logArea = new JTextArea(8, 20);
+        logArea.setEditable(false);
+        logArea.setBackground(new Color(240, 240, 240));
+        logArea.setFont(new Font("Consolas", Font.PLAIN, 12));
+        JScrollPane scrollLogs = new JScrollPane(logArea);
+
+        JPanel buttonPanel = new JPanel();
+        buttonPanel.setLayout(new FlowLayout());
+
+        btnBootstrap = new JButton("1. Bootstrap Network");
+        btnState = new JButton("2. View System States");
+        btnDownload = new JButton("3. Execute Download");
+        btnRollback = new JButton("4. Rollback Last Chunk");
+
+        btnDownload.setEnabled(false);
+        btnRollback.setEnabled(false);
+        btnState.setEnabled(false);
+
+        buttonPanel.add(btnBootstrap);
+        buttonPanel.add(btnState);
+        buttonPanel.add(btnDownload);
+        buttonPanel.add(btnRollback);
+
+        add(buttonPanel, BorderLayout.NORTH);
+        add(scrollDisplay, BorderLayout.CENTER);
+        add(scrollLogs, BorderLayout.SOUTH);
+
+        btnBootstrap.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                bootstrapNetwork();
+                btnBootstrap.setEnabled(false);
+                btnDownload.setEnabled(true);
+                btnState.setEnabled(true);
+                updateLogDisplay();
+                displayArea.setText("Network Successfully Bootstrapped!\nClick 'View System States' or 'Execute Download'.");
+            }
+        });
+
+        btnState.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                refreshSystemStateDisplay();
+            }
+        });
+
+        btnDownload.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                executeDistributedDownload();
+                btnRollback.setEnabled(true);
+                updateLogDisplay();
+            }
+        });
+
+        btnRollback.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                rollbackLastDownloadedChunk();
+                updateLogDisplay();
+            }
+        });
     }
 
     private void addLog(String message) {
         if (logCount < systemLogs.length) {
             systemLogs[logCount++] = message;
         }
+    }
+
+    private void updateLogDisplay() {
+        StringBuilder sb = new StringBuilder("--- Static System Event Logs ---\n");
+        for (int i = 0; i < logCount; i++) {
+            sb.append("Log Event [").append(i).append("]: ").append(systemLogs[i]).append("\n");
+        }
+        logArea.setText(sb.toString());
     }
 
     public void bootstrapNetwork() {
@@ -147,13 +228,18 @@ public class DistributedDownloadManager {
         networkCatalog.insert(750, "BigData_Dataset.tar.gz", 15400);
 
         peerNetwork.addPeer(1, "192.168.1.50", 15);
-        peerNetwork.addPeer(2, "10.0.0.12", 95);  // Fast node
-        peerNetwork.addPeer(3, "172.16.5.88", 45); // Mid node
+        peerNetwork.addPeer(2, "10.0.0.12", 95);
+        peerNetwork.addPeer(3, "172.16.5.88", 45);
+
+        missingChunksList.clear();
+        chunkDownloadQueue.clear();
+        chunkRegistryMap.clear();
+        clusterPriorityQueue.clear();
 
         for (int chunkId = 1001; chunkId <= 1006; chunkId++) {
             missingChunksList.add(chunkId);
-            chunkDownloadQueue.add(chunkId); // Queueing chunks for processing
-            chunkRegistryMap.put(chunkId, "PENDING"); // Mapping state in O(1)
+            chunkDownloadQueue.add(chunkId);
+            chunkRegistryMap.put(chunkId, "PENDING");
         }
 
         PeerNode currentPeer = peerNetwork.getHead();
@@ -163,77 +249,70 @@ public class DistributedDownloadManager {
         }
     }
 
-
     public void executeDistributedDownload() {
-        System.out.println("\n--- Initiating Multi-Peer Parallel Swarm Download ---");
+        StringBuilder sb = new StringBuilder("--- Initiating Multi-Peer Parallel Swarm Download ---\n");
         addLog("Download Executed");
 
-        if (clusterPriorityQueue.isEmpty() || chunkDownloadQueue.isEmpty()) return;
+        if (clusterPriorityQueue.isEmpty() || chunkDownloadQueue.isEmpty()) {
+            displayArea.setText("No chunks available to download or no peers found.");
+            return;
+        }
 
         while (!chunkDownloadQueue.isEmpty()) {
-
             int currentChunk = chunkDownloadQueue.poll();
-
             ActiveDownloader elitePeer = clusterPriorityQueue.peek();
 
-            System.out.println("[Swarm Control] Extracting Chunk ID " + currentChunk +
-                    " -> Routed via Cluster Peer Node #" + elitePeer.peerId +
-                    " at " + elitePeer.currentSpeed + " Mbps");
-
+            sb.append("[Swarm Control] Extracting Chunk ID ").append(currentChunk)
+                    .append(" -> Routed via Cluster Peer Node #").append(elitePeer.peerId)
+                    .append(" at ").append(elitePeer.currentSpeed).append(" Mbps\n");
 
             chunkRegistryMap.put(currentChunk, "COMPLETED");
-
             completedDownloadHistory.push(currentChunk);
         }
-        System.out.println(">> File Swarm Assembly Status: Complete.");
+        sb.append(">> File Swarm Assembly Status: Complete.\n\n");
+        sb.append("Click 'View System States' to see updated chunk statuses.");
+        displayArea.setText(sb.toString());
     }
 
     public void rollbackLastDownloadedChunk() {
-
-        System.out.println("\n--- Simulating User Intent: Rollback Last Action ---");
+        StringBuilder sb = new StringBuilder("--- Simulating User Intent: Rollback Last Action ---\n");
         if (!completedDownloadHistory.isEmpty()) {
-            int revertedChunk = completedDownloadHistory.pop(); // Stack Pop
-            chunkRegistryMap.put(revertedChunk, "ROLLBACK_PENDING"); // Map update
+            int revertedChunk = completedDownloadHistory.pop();
+            chunkRegistryMap.put(revertedChunk, "ROLLBACK_PENDING");
+            chunkDownloadQueue.add(revertedChunk);
 
-            chunkDownloadQueue.add(revertedChunk); // Queue Re-insertion
-            System.out.println("Reverted Chunk ID: " + revertedChunk + " is flagged back to download pipeline.");
+            sb.append("Reverted Chunk ID: ").append(revertedChunk).append(" is flagged back to download pipeline.\n\n");
+            sb.append("Click 'Execute Download' to re-download or 'View System States' to check status.");
+            addLog("Rollback Chunk #" + revertedChunk);
         } else {
-
-            System.out.println("History Stack is currently clear.");
+            sb.append("History Stack is currently clear. No chunks to rollback.");
         }
+        displayArea.setText(sb.toString());
     }
 
-    public void displaySystemStates() {
+    public void refreshSystemStateDisplay() {
+        StringBuilder sb = new StringBuilder();
 
-        networkCatalog.displayCatalog();
-        peerNetwork.displayPeers();
+        sb.append(networkCatalog.getCatalogString()).append("\n");
 
+        sb.append(peerNetwork.getPeersString()).append("\n");
 
-        System.out.println("\n--- Cluster Tracker State Map (HashMap Verification) ---");
-        for (Map.Entry<Integer, String> entry : chunkRegistryMap.entrySet()) {
-            System.out.println("Chunk #" + entry.getKey() + " Status: [ " + entry.getValue() + " ]");
-
+        sb.append("--- Cluster Tracker State Map (HashMap Verification) ---\n");
+        ArrayList<Integer> sortedKeys = new ArrayList<>(chunkRegistryMap.keySet());
+        Collections.sort(sortedKeys);
+        for (int key : sortedKeys) {
+            sb.append("Chunk #").append(key).append(" Status: [ ").append(chunkRegistryMap.get(key)).append(" ]\n");
         }
 
-        System.out.println("\n--- Static System Event Logs (Array Data) ---");
-        for (int i = 0; i < logCount; i++) {
-            System.out.println("Log Event [" + i + "]: " + systemLogs[i]);
-
-        }
+        displayArea.setText(sb.toString());
     }
-
 
     public static void main(String[] args) {
-        DistributedDownloadManager torrentEngine = new DistributedDownloadManager();
-
-        torrentEngine.bootstrapNetwork();
-
-        torrentEngine.displaySystemStates();
-
-        torrentEngine.executeDistributedDownload();
-
-        torrentEngine.rollbackLastDownloadedChunk();
-
-        torrentEngine.displaySystemStates();
+        SwingUtilities.invokeLater(new Runnable() {
+            @Override
+            public void run() {
+                new DistributedDownloadManager().setVisible(true);
+            }
+        });
     }
 }
